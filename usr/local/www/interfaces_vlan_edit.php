@@ -67,6 +67,17 @@ foreach ($portlist as $portname => $port) {
 	}
 }
 
+/* allow to select VXLAN interfaces, see https://redmine.pfsense.org/issues/11143 */
+if (is_array($config['vxlans']['vxlan']) && count($config['vxlans']['vxlan'])) {
+	foreach ($config['vxlans']['vxlan'] as $vxlan) {
+		$portlist[$vxlan['vxlanif']] = array('mac' => $vxlan['vxlanif']);
+		$friendly = convert_real_interface_to_friendly_interface_name($vxlan['vxlanif']);
+		if ($friendly) {
+			$portlist[$vxlan['vxlanif']]['friendly'] = $friendly;
+		}
+	}
+}
+
 if (is_numericint($_REQUEST['id'])) {
 	$id = $_REQUEST['id'];
 }

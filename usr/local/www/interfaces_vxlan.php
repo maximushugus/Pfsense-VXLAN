@@ -1,11 +1,11 @@
 <?php
 /*
- * interfaces_bridge.php
+ * interfaces_vxlan.php
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2004-2013 BSD Perimeter
  * Copyright (c) 2013-2016 Electric Sheep Fencing
- * Copyright (c) 2014-2023 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2014-2021 Rubicon Communications, LLC (Netgate)
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,24 +22,24 @@
  */
 
 ##|+PRIV
-##|*IDENT=page-interfaces-bridge
-##|*NAME=Interfaces: Bridge
-##|*DESCR=Allow access to the 'Interfaces: Bridge' page.
-##|*MATCH=interfaces_bridge.php*
+##|*IDENT=page-interfaces-vxlan
+##|*NAME=Interfaces: VXLAN
+##|*DESCR=Allow access to the 'Interfaces: VXLAN' page.
+##|*MATCH=interfaces_vxlan.php*
 ##|-PRIV
 
 require_once("guiconfig.inc");
+require_once("functions.inc");
 
-init_config_arr(array('bridges', 'bridged'));
-$a_bridges = &$config['bridges']['bridged'];
+init_config_arr(array('vxlans', 'vxlan'));
+$a_vxlans = &$config['vxlans']['vxlan'] ;
 
-function bridge_inuse($num) {
-	global $config, $a_bridges;
+function vxlan_inuse($num) {
+	global $config, $a_vxlans;
 
 	$iflist = get_configured_interface_list(true);
-
 	foreach ($iflist as $if) {
-		if ($config['interfaces'][$if]['if'] == $a_bridges[$num]['bridgeif']) {
+		if ($config['interfaces'][$if]['if'] == $a_vxlans[$num]['vxlanif']) {
 			return true;
 		}
 	}
@@ -50,28 +50,23 @@ function bridge_inuse($num) {
 if ($_POST['act'] == "del") {
 	if (!isset($_POST['id'])) {
 		$input_errors[] = gettext("Wrong parameters supplied");
-	} else if (empty($a_bridges[$_POST['id']])) {
+	} else if (empty($a_vxlans[$_POST['id']])) {
 		$input_errors[] = gettext("Wrong index supplied");
 	/* check if still in use */
-	} else if (bridge_inuse($_POST['id'])) {
-		$input_errors[] = gettext("This bridge cannot be deleted because it is assigned as an interface.");
+	} else if (vxlan_inuse($_POST['id'])) {
+		$input_errors[] = gettext("This VXLAN tunnel cannot be deleted because it is still being used as an interface.");
 	} else {
-		if (!does_interface_exist($a_bridges[$_POST['id']]['bridgeif'])) {
-			log_error("Bridge interface does not exist, skipping ifconfig destroy.");
-		} else {
-			pfSense_interface_destroy($a_bridges[$_POST['id']]['bridgeif']);
-		}
+		pfSense_interface_destroy($a_vxlans[$_POST['id']]['vxlanif']);
+		unset($a_vxlans[$_POST['id']]);
 
-		unset($a_bridges[$_POST['id']]);
+		write_config("VXLAN interface deleted");
 
-		write_config("Bridge deleted");
-
-		header("Location: interfaces_bridge.php");
+		header("Location: interfaces_vxlan.php");
 		exit;
 	}
 }
 
-$pgtitle = array(gettext("Interfaces"), gettext("Bridges"));
+$pgtitle = array(gettext("Interfaces"), gettext("VXLANs"));
 $shortcut_section = "interfaces";
 include("head.inc");
 if ($input_errors) {
@@ -87,63 +82,48 @@ $tab_array[] = array(gettext("QinQs"), false, "interfaces_qinq.php");
 $tab_array[] = array(gettext("PPPs"), false, "interfaces_ppps.php");
 $tab_array[] = array(gettext("GREs"), false, "interfaces_gre.php");
 $tab_array[] = array(gettext("GIFs"), false, "interfaces_gif.php");
-$tab_array[] = array(gettext("VXLANs"), false, "interfaces_vxlan.php");
-$tab_array[] = array(gettext("Bridges"), true, "interfaces_bridge.php");
+$tab_array[] = array(gettext("VXLANs"), true, "interfaces_vxlan.php");
+$tab_array[] = array(gettext("Bridges"), false, "interfaces_bridge.php");
 $tab_array[] = array(gettext("LAGGs"), false, "interfaces_lagg.php");
 display_top_tabs($tab_array);
 ?>
 <div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Bridge Interfaces')?></h2></div>
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('VXLAN Interfaces')?></h2></div>
 	<div class="panel-body">
 		<div class="table-responsive">
 			<table class="table table-striped table-hover table-condensed table-rowdblclickedit">
 				<thead>
 					<tr>
 						<th><?=gettext("Interface"); ?></th>
-						<th><?=gettext("Members"); ?></th>
+						<th><?=gettext("Tunnel to"); ?></th>
 						<th><?=gettext("Description"); ?></th>
 						<th><?=gettext("Actions"); ?></th>
 					</tr>
 				</thead>
 				<tbody>
-<?php
-
-$i = 0;
-$ifdescrs = get_configured_interface_with_descr();
-
-foreach ($a_bridges as $bridge) {
+<?php foreach ($a_vxlans as $i => $vxlan):
+	if (substr($vxlan['if'], 0, 4) == "_vip") {
+		$if = convert_real_interface_to_friendly_descr(get_real_interface($vxlan['if']));
+	} else {
+		$if = $vxlan['if'];
+	}
 ?>
 					<tr>
 						<td>
-							<?=htmlspecialchars(strtoupper($bridge['bridgeif']))?>
+							<?=htmlspecialchars(convert_friendly_interface_to_friendly_descr($if))?>
 						</td>
 						<td>
-<?php
-	$members = explode(',', $bridge['members']);
-	$j = 0;
-	foreach ($members as $member) {
-		if (isset($ifdescrs[$member])) {
-			echo $ifdescrs[$member];
-			$j++;
-		}
-		if ($j > 0 && $j < count($members)) {
-			echo ", ";
-		}
-	}
-?>
+							<?=htmlspecialchars($vxlan['remote-addr'])?>
 						</td>
 						<td>
-							<?=htmlspecialchars($bridge['descr'])?>
+							<?=htmlspecialchars($vxlan['descr'])?>
 						</td>
 						<td>
-							<a class="fa fa-pencil"	title="<?=gettext('Edit interface bridge')?>"	href="interfaces_bridge_edit.php?id=<?=$i?>"></a>
-							<a class="fa fa-trash"	title="<?=gettext('Delete interface bridge')?>"	href="interfaces_bridge.php?act=del&amp;id=<?=$i?>" usepost></a>
+							<a class="fa fa-pencil"	title="<?=gettext('Edit VXLAN interface')?>"	href="interfaces_vxlan_edit.php?id=<?=$i?>"></a>
+							<a class="fa fa-trash"	title="<?=gettext('Delete VXLAN interface')?>"	href="interfaces_vxlan.php?act=del&amp;id=<?=$i?>" usepost></a>
 						</td>
 					</tr>
-<?php
-	$i++;
-}
-?>
+<?php endforeach; ?>
 				</tbody>
 			</table>
 		</div>
@@ -151,10 +131,10 @@ foreach ($a_bridges as $bridge) {
 </div>
 
 <nav class="action-buttons">
-	<a href="interfaces_bridge_edit.php" class="btn btn-success btn-sm">
+	<a href="interfaces_vxlan_edit.php" class="btn btn-success btn-sm">
 		<i class="fa fa-plus icon-embed-btn"></i>
 		<?=gettext("Add")?>
 	</a>
 </nav>
-
-<?php include("foot.inc");
+<?php
+include("foot.inc");
